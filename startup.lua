@@ -3,7 +3,8 @@
 ------------ OPTIONS --------------
 
 local doPine3D = false
-local maxBR = 52
+local maxBR = 1024
+local maxEnergyConsume = 2000000
 
 -----------------------------------
 
@@ -20,23 +21,18 @@ local relay = { peripheral.find("redstone_relay") }
 local mon = peripheral.find("monitor")
 local react = peripheral.find("fissionReactorLogicAdapter")
 local turb = peripheral.find("turbineValve")
-local meter = peripheral.find("energymeter")
+local meter = peripheral.find("energy_detector")
 local tank = peripheral.find("ultimateChemicalTank")
-local tube = peripheral.find("elitePressurizedTube")
+local tube = peripheral.find("ultimatePressurizedTube")
 
-if not mon == nil then
-    mon.setTextScale(0.5)
-    mon.clear()
-    term.redirect(mon)
-    X, Y = mon.getSize()
-else
-    X, Y = term.getSize()
-end
-
+mon.setTextScale(0.5)
+mon.clear()
+term.redirect(mon)
 term.setBackgroundColor(colors.black)
 term.clear()
 term.setCursorPos(1,1)
 term.setTextColor(colors.white)
+X, Y = mon.getSize()
 LCX, LCY = 0,0
 
 
@@ -102,7 +98,7 @@ end
 
 local function drawLine(box,x1,y1,x2,y2,color)
     local x, y = 0,0
-    for t=0,1,0.01 do
+    for t=0,1,0.1 do
         if x1 > x2 then
             x = math.floor(x1 + t * (x2 - x1))
         else
@@ -157,13 +153,13 @@ end
 local state_to_audio = {"normal.dfpwm", "no_production.dfpwm", "low_rate.dfpwm", "safety_mode.dfpwm", "explosion.dfpwm"}
 local defaultAudioPath = "audio_nr/"
 
-local values = {efp= 0, prod=0, consume=0, genfuel=0, fuel=0, waste=0, br=0, temp=0, gendeltafuel=0, deltafuel=0, status=false, updaterate=0, rtbr=0, log={}}
+local values = {efp= 0, prod=0, consume=0, genfuel=0, fuel=0, waste=0, coolant=0, br=0, temp=0, gendeltafuel=0, deltafuel=0, status=false, updaterate=0.5, rtbr=0, log={}}
 local status = 1
 local safeshutdown = false
-local energysurge = false
 local musicStart = false
 local safetyfill = false
 local startstopvar = false
+local surgeEnd = os.clock()
 local log = {"["..textutils.formatTime(os.time()).."] [INFO] Nuclear reactor plant computer has started correctly!"}
 
 local function add_log(type, message)
@@ -186,38 +182,51 @@ local function getValuesFast()
     while safeshutdown == false do
         values.prod = turb.getProductionRate()
         values.consume = meter.getTransferRate()
-        sleep()
+        sleep(1)
     end
 end
 
 local function getFuelValues()
     local oldGenFuel = 0
+    local clock = os.clock()
+    local oldClock = clock-0.2
     while safeshutdown == false do
         values.fuel = react.getFuel().amount
         values.genfuel = tank.getStored().amount + tube.getBuffer().amount + values.fuel
-        values.gendeltafuel = values.genfuel-oldGenFuel
+        values.gendeltafuel = ((values.genfuel-oldGenFuel)/(clock-oldClock))/20
         oldGenFuel = values.genfuel
-        sleep()
+        oldClock = clock
+        sleep(0.2)
+        clock = os.clock()
     end
 end
 
 local function getValuesSlow()
     local oldFuel = 0
+    local clock = os.clock()
+    local oldClock = clock-0.2
     while safeshutdown == false do
         values.status = react.getStatus()
         if values.status then values.br = react.getActualBurnRate() end
         values.efp = turb.getEnergyFilledPercentage()
         values.waste = react.getWasteFilledPercentage()
+        values.coolant = react.getCoolantFilledPercentage()
         values.temp = react.getTemperature() - 273.15
-        values.deltafuel = values.fuel-oldFuel
+        values.deltafuel = ((values.fuel-oldFuel)/(clock-oldClock))/20
         oldFuel = values.fuel
         values.log = log
-        sleep()
+        oldClock = clock
+        sleep(0.2)
+        clock = os.clock()
     end
 end
 
 local function getValues()
     parallel.waitForAll(getValuesFast, getValuesSlow, getFuelValues)
+end
+
+local function surge()
+    surgeEnd = os.clock() + 5
 end
 
 local function startStop()
@@ -227,13 +236,9 @@ local function startStop()
     else
         react.activate()
         sleep(1)
-        energysurge = true
+        surge()
         startstopvar = false
     end
-end
-
-local function surge()
-    energysurge = true
 end
 
 local function musicloop()
@@ -302,31 +307,26 @@ local function safety_logic()
     local insfuelprinted = false
     local tempbr = 0
     while safeshutdown == false do
-        if values.fuel >= 2000 and values.status == false and values.consume > 1000 and startstopvar == false then
+        local clock = os.clock()
+        if values.coolant >= 0.3 and values.fuel >= 2000 and values.status == false and values.consume > 1000 and startstopvar == false then
             react.activate()
             values.status = true
         end
 
         if values.status then
-            if values.deltafuel < 0 then
+            if values.deltafuel < 0 and values.gendeltafuel < 0 then
                 status = 2
-                if insfuelprinted then add_log("WARN", "Not enough fissile fuel to sustain the reaction!") insfuelprinted = true end
+                if not insfuelprinted then add_log("WARN", "Not enough fissile fuel to sustain the reaction!") insfuelprinted = true end
             else
                 status = 1
                 insfuelprinted = false
-            end
-
-            if values.gendeltafuel < 0 then
-                status = 2
-            else
-                status = 1
             end
 
             -- burn rate calculation
 
             local burn = (values.consume/1.14211)*(1/20000)
             if values.efp <= 0.1 then
-                if values.consume <= 200000 then
+                if values.consume <= maxEnergyConsume then
                     tempbr = clamp(burn*2,0,maxBR)
                     values.rtbr = clamp(burn*2,0,maxBR)
                 end
@@ -336,10 +336,10 @@ local function safety_logic()
             end
 
             -- safety logic
-            if values.efp > 0.9 or values.waste > 0.01 or values.temp > 5000 and values.status then
+            if values.coolant <= 0.2 or values.efp > 0.9 or values.waste > 0.01 or values.temp > 5000 and values.status then
                 values.rtbr = 0
                 react.setBurnRate(0)
-                if safetyfill and values.temp < 5000 and values.waste < 0.01 then
+                if safetyfill and values.temp < 5000 and values.waste < 0.01 and values.coolant >= 0.3 then
                     safetyfill = false
                     playAudioFile(defaultAudioPath.."safetyfill_success.dfpwm", true)
                     add_log("INFO/SF", "Safety fill completed with success!")
@@ -351,17 +351,14 @@ local function safety_logic()
                 sleep(5)
             end
 
-            if energysurge then
+            if surgeEnd >= clock then
                 tempbr = maxBR
                 values.rtbr = maxBR
-                energysurge = false
-                sleep(5)
             end
 
             if safetyfill then
                 tempbr = maxBR
                 values.rtbr = maxBR
-
             end
 
         else
@@ -438,7 +435,7 @@ local function displaySimple()
 
         term.setBackgroundColor(colors.black)
         term.setTextColor(colors.white)
-        sleep()
+        sleep(0.2)
     end
 end
 
@@ -516,7 +513,7 @@ local function displayComplex()
         term.setCursorPos(math.floor(((X-70)+71)/2), 1)
         term.write("ENERGIA")
 
-        sleep()
+        sleep(0.2)
     end
 end
 
@@ -537,7 +534,7 @@ local function pine3dLoop()
         else
             term.setCursorPos(35,25)
             term.write("Pine3D is deactivated")
-            sleep()
+            sleep(2)
         end
     end
 end
@@ -554,7 +551,7 @@ local function messages()
             if safetyfill == false then playAudioFile(defaultAudioPath.."delivery.dfpwm") end
             sleep(5)
         end
-        sleep()
+        sleep(0.1)
     end
 end
 
@@ -566,15 +563,15 @@ local function random_tip()
         if roll <= chance then
             if safetyfill == false then playAudioFile(defaultAudioPath.."/tips/tip"..tip..".dfpwm", false) end
         end
-        sleep(60)
+        sleep(30)
     end
 end
 
 local function broadcast()
-    rednet.open()
-    local key = AES.StringToKey("CCTweakedReactor", 1024)
+    peripheral.find("modem", rednet.open)
+    local key = aes.StringToKey("CCTweakedReactor", 1024)
     while safeshutdown == false do
-        rednet.broadcast(aes.Encrypt(AES.StringToTable(json.encode(values)), key))
+        rednet.broadcast(aes.Encrypt(aes.StringToTable(json.encode(values)), key))
         sleep(values.updaterate)
     end
 end
