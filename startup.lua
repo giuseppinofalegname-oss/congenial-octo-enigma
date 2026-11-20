@@ -12,8 +12,8 @@ local dfpwm = require("cc.audio.dfpwm")
 local pb = require("pixelbox_lite")
 local Pine3D = require("Pine3D")
 local ccstring = require("cc.strings")
-local binser = require("binser");
-local aeslua = require("aeslua");
+local json = require("json");
+local aes = require("AES");
 
 local speakers = { peripheral.find("speaker") }
 local relay = { peripheral.find("redstone_relay") }
@@ -240,7 +240,7 @@ local function musicloop()
     while safeshutdown == false do
         if musicStart then
             if safetyfill == false then
-                local num = math.random(9)
+                local num = math.random(2)
                 playAudioFile(defaultAudioPath.."/songs/song"..num..".dfpwm", true)
             end
         end
@@ -562,7 +562,7 @@ local function random_tip()
     local chance = 20
     while safeshutdown == false do
         local roll = math.random(100)
-        local tip = math.random(9)
+        local tip = math.random(6)
         if roll <= chance then
             if safetyfill == false then playAudioFile(defaultAudioPath.."/tips/tip"..tip..".dfpwm", false) end
         end
@@ -572,8 +572,9 @@ end
 
 local function broadcast()
     rednet.open()
+    local key = AES.StringToKey("CCTweakedReactor", 1024)
     while safeshutdown == false do
-        rednet.broadcast(aes.encrypt("CCTweakedReactor", binser.serialize(values)))
+        rednet.broadcast(aes.Encrypt(AES.StringToTable(json.encode(values)), key))
         sleep(values.updaterate)
     end
 end
