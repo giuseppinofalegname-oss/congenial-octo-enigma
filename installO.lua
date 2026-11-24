@@ -190,14 +190,6 @@ local function loadManifest()
         return {}
     end
 
-    local handle = fs.open(MANIFEST_FILE, "r")
-    if not handle then
-        return {}
-    end
-
-    local contents = handle.readAll()
-    handle.close()
-
     local ok, manifest = pcall(textutils.unserialize, contents)
     if ok and type(manifest) == "table" then
         return manifest
@@ -209,14 +201,10 @@ end
 
 local function saveManifest(manifest)
     local temporary = MANIFEST_FILE .. ".tmp"
-    local handle, err = fs.open(temporary, "w")
 
     if not handle then
         return false, "Cannot write manifest: " .. tostring(err)
     end
-
-    local ok, writeErr = pcall(handle.write, textutils.serialize(manifest))
-    handle.close()
 
     if not ok then
         fs.delete(temporary)

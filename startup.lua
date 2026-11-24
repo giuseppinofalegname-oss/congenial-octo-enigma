@@ -15,6 +15,7 @@ local Pine3D = require("Pine3D")
 local ccstring = require("cc.strings")
 local json = require("json");
 local aes = require("AES");
+local nas = require("NAS")
 
 local speakers = { peripheral.find("speaker") }
 local relay = { peripheral.find("redstone_relay") }
@@ -140,7 +141,7 @@ local function playAudioFile(filepath, priority)
         end
     end
 
-    for chunk in io.lines(filepath, 8 * 1024) do
+    for chunk in nas.lines(filepath, 8 * 1024) do
         local buffer = decoder(chunk)
         for _, speaker in pairs(speakers) do
             while not speaker.playAudio(buffer) do
@@ -151,7 +152,7 @@ local function playAudioFile(filepath, priority)
 end
 
 local state_to_audio = {"normal.dfpwm", "no_production.dfpwm", "low_rate.dfpwm", "safety_mode.dfpwm", "explosion.dfpwm"}
-local defaultAudioPath = "audio_nr/"
+local defaultAudioPath = ""
 
 local values = {efp= 0, prod=0, consume=0, genfuel=0, fuel=0, waste=0, coolant=0, br=0, temp=0, gendeltafuel=0, deltafuel=0, status=false, updaterate=0.5, rtbr=0, log={}}
 local status = 1
@@ -171,11 +172,25 @@ local function add_log(type, message)
 
 end
 
+local function safeShutdownCall()
+    react.scram()
+    safeshutdown = true
+end
+
 local function logErrorHandler( err )
     add_log("ERROR", "An error occurred: ")
     log[#log+1] = err
-    react.scram()
-    safeshutdown = true
+    safeShutdownCall()
+end
+
+local function criticalEventHandler()
+    while true do
+        local event = os.pullEventRaw()
+        if event == "terminate" or event == "peripheral_detach" then
+            logErrorHandler("Critical event fired: " .. event)
+            os.shutdown()
+        end
+    end
 end
 
 local function getValuesFast()
@@ -246,7 +261,7 @@ local function musicloop()
         if musicStart then
             if safetyfill == false then
                 local num = math.random(2)
-                playAudioFile(defaultAudioPath.."/songs/song"..num..".dfpwm", true)
+                playAudioFile(fs.combine(defaultAudioPath, "/song"..num..".dfpwm"), true)
             end
         end
         sleep()
@@ -277,7 +292,7 @@ local function safetyfill_loop()
                 musicStart = false
             end
             add_log("WARN", "Safety Fill activated! System will now rely on it's own auto-shutdown!")
-            playAudioFile(defaultAudioPath.."safetyfill.dfpwm", true)
+            playAudioFile(fs.combine(defaultAudioPath, "safetyfill.dfpwm"), true)
             audio_played = true
         end
         sleep()
@@ -341,7 +356,7 @@ local function safety_logic()
                 react.setBurnRate(0)
                 if safetyfill and values.temp < 5000 and values.waste < 0.01 and values.coolant >= 0.3 then
                     safetyfill = false
-                    playAudioFile(defaultAudioPath.."safetyfill_success.dfpwm", true)
+                    playAudioFile(fs.combine(defaultAudioPath, "safetyfill_success.dfpwm"), true)
                     add_log("INFO/SF", "Safety fill completed with success!")
                 else
                     startstopvar = true
@@ -544,14 +559,14 @@ local function messages()
         local val, i = relayGetAny()
         if val and i == 2 then
             add_log("INFO/AUDIO", "New player has entered the plant! Playing welcome message n."..status)
-            if safetyfill == false then playAudioFile(defaultAudioPath..state_to_audio[status], true) end
+            if safetyfill == false then playAudioFile(fs.combine(defaultAudioPath, state_to_audio[status]), true) end
             sleep(5)
         elseif val and i == 1 then
             add_log("INFO", "Delivery arrived!")
-            if safetyfill == false then playAudioFile(defaultAudioPath.."delivery.dfpwm") end
+            if safetyfill == false then playAudioFile(fs.combine(defaultAudioPath, "delivery.dfpwm")) end
             sleep(5)
         end
-        sleep(0.1)
+        os.pullEvent("redstone")
     end
 end
 
@@ -561,7 +576,7 @@ local function random_tip()
         local roll = math.random(100)
         local tip = math.random(6)
         if roll <= chance then
-            if safetyfill == false then playAudioFile(defaultAudioPath.."/tips/tip"..tip..".dfpwm", false) end
+            if safetyfill == false then playAudioFile(fs.combine(defaultAudioPath, "/tip"..tip..".dfpwm"), false) end
         end
         sleep(30)
     end
@@ -577,6 +592,7 @@ local function broadcast()
 end
 
 local function safe_safety_logic() xpcall(safety_logic, logErrorHandler) end
+local function safe_critical_events() xpcall(criticalEventHandler, logErrorHandler) end
 local function safe_getValues() xpcall(getValues, logErrorHandler) end
 local function safe_displaySimple() xpcall(displaySimple, logErrorHandler) end
 local function safe_displayComplex() xpcall(displayComplex, logErrorHandler) end
@@ -584,4 +600,4 @@ local function safe_pine3dloop() xpcall(pine3dLoop, logErrorHandler) end
 local function safe_broadcast() xpcall(broadcast, logErrorHandler) end
 local function safe_safetyfill_loop() xpcall(safetyfill_loop, logErrorHandler) end
 
-parallel.waitForAll(messages, random_tip, safe_safety_logic, safe_getValues, safe_displaySimple, safe_displayComplex, safe_pine3dloop, safe_broadcast, safe_safetyfill_loop, musicloop, get_player_touch)
+parallel.waitForAll(messages, random_tip, safe_safety_logic, safe_critical_events, safe_getValues, safe_displaySimple, safe_displayComplex, safe_pine3dloop, safe_broadcast, safe_safetyfill_loop, musicloop, get_player_touch)
