@@ -1,13 +1,14 @@
 ---@diagnostic disable: undefined-global
 
 local index = {}
+local defaultAudioPath = "audio_nr/"
 
 local function loadFiles(path)
     if not path then path = "disk*/*"
     else path = path .. "/*" end
     for _, filepath in ipairs(fs.find(path)) do
         if fs.isDir(filepath) then loadFiles(filepath)
-        else index[fs.getName(filepath)] = filepath end
+        else index[fs.combine(defaultAudioPath, fs.getName(filepath))] = filepath end
     end
 end
 
@@ -58,15 +59,23 @@ local function loadFile(filename)
     local handler
     if not filepaths then
         handler = fs.open(filename, "rb")
-        data = handler.readAll()
-        handler.close()
-        return data
+        if handler then
+            data = handler.readAll()
+            handler.close()
+            return data
+        else
+            goto loadFileEnd
+        end
     end
     if not isChunked then
         handler = fs.open(filepaths, "rb")
-        data = handler.readAll()
-        handler.close()
-        return data
+        if handler then
+            data = handler.readAll()
+            handler.close()
+            return data
+        else
+            goto loadFileEnd
+        end
     end
     for _, value in ipairs(filepaths) do
         handler = fs.open(value, "rb")
@@ -75,6 +84,7 @@ local function loadFile(filename)
             handler.close()
         end
     end
+    ::loadFileEnd::
     return table.concat(data)
 end
 

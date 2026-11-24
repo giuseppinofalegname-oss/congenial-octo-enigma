@@ -3,8 +3,8 @@
 ------------ OPTIONS --------------
 
 local doPine3D = false
-local maxBR = 1024
-local maxEnergyConsume = 2000000
+local maxBR = 30
+local maxEnergyConsume = 1000000
 
 -----------------------------------
 
@@ -152,7 +152,7 @@ local function playAudioFile(filepath, priority)
 end
 
 local state_to_audio = {"normal.dfpwm", "no_production.dfpwm", "low_rate.dfpwm", "safety_mode.dfpwm", "explosion.dfpwm"}
-local defaultAudioPath = ""
+local defaultAudioPath = "audio_nr/"
 
 local values = {efp= 0, prod=0, consume=0, genfuel=0, fuel=0, waste=0, coolant=0, br=0, temp=0, gendeltafuel=0, deltafuel=0, status=false, updaterate=0.5, rtbr=0, log={}}
 local status = 1
@@ -407,7 +407,7 @@ local function displaySimple()
         DATASHEET.setCursorPos(4,4)
         DATASHEET.write("Energy Production: "..round(values.prod/2.5, 2).." FE/t     ")
         DATASHEET.setCursorPos(4,5)
-        DATASHEET.write("Energy Filled: "..(values.efp*100).." %   ")
+        DATASHEET.write("Energy Filled: "..(round(values.efp*100, 2)).." %   ")
         DATASHEET.setCursorPos(4,6)
         DATASHEET.write("Burn Rate: "..values.br.." mB/t    ")
         DATASHEET.setCursorPos(4,7)
